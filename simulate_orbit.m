@@ -1,60 +1,100 @@
-%% Single-planet smooth elliptical orbit (MATLAB / Octave)
 clear; close all; clc;
 
 % --- Constants ---
 G      = 6.67430e-11;       % m^3 kg^-1 s^-2
 M_sun  = 1.989e30;          % kg
 
-% --- Orbital parameters (change 'e' to 0.0167 for Earth-like) ---
-a = 1.496e11;   % semi-major axis (1 AU) [m]
-e = 0.2;        % eccentricity (0.2 visible ellipse; set 0.0167 for Earth)
+% --- Planet parameters ---
+planets = {
+    'Mercury', 0.6e11, 0.15, [0.8 0.8 0.8];
+    'Venus',   0.9e11, 0.05, [1.0 0.7 0.2];
+    'Earth',   1.0e11, 0.10, [0.2 0.6 1.0];
+    'Mars',    1.2e11, 0.20, [1.0 0.4 0.3];
+    'Jupiter', 1.5e11, 0.05, [0.9 0.8 0.5];
+};
 
-% initial position at perihelion and correct initial velocity (vis-viva)
-r0 = [ a*(1 - e); 0; 0 ];                          % perihelion
-v0y = sqrt( G*M_sun * ( 2 / norm(r0) - 1 / a ) ); % speed from vis-viva
-v0 = [0; v0y; 0];                                  % perpendicular to r
-
-Y0 = [r0; v0];   % state: [x;y;z; vx;vy;vz]
-
-% orbital period (Kepler)
-T_orbit = 2*pi*sqrt(a^3 / (G*M_sun));
-fprintf('Orbital period = %.2f days\n', T_orbit/86400);
-
-% --- Solve (let solver choose internal steps for accuracy) ---
-opts = odeset('RelTol',1e-9,'AbsTol',1e-12);
-odefun = @(t,y) [ y(4:6); -G*M_sun * y(1:3) / norm(y(1:3))^3 ];
-[t_sol, Y_sol] = ode45(odefun, [0 T_orbit], Y0, opts);
-
-% --- Interpolate to uniform time grid for smooth animation ---
-nFrames = 1200;                           % increase for smoother animation
-t_anim = linspace(0, T_orbit, nFrames);
-Y_anim = interp1(t_sol, Y_sol, t_anim);  % returns (nFrames x 6)
-
-x = Y_anim(:,1); y = Y_anim(:,2); z = Y_anim(:,3);
-
-% --- Plot setup ---
+nFrames = 1500;
 fig = figure('Color','k');
 ax = axes('Parent',fig);
 hold(ax,'on');
-plot3(ax, 0,0,0, 'yo', 'MarkerSize', 20, 'MarkerFaceColor', 'y'); % Sun
+plot3(ax,0,0,0,'yo','MarkerSize',20,'MarkerFaceColor','y'); % Sun
 
-h_planet = plot3(ax, x(1), y(1), z(1), 'o', 'MarkerSize', 8, ...
-                 'MarkerFaceColor', 'r', 'MarkerEdgeColor','none');
-h_trail  = plot3(ax, x(1), y(1), z(1), '-', 'LineWidth', 1.2, 'Color', [0.2 0.6 1]);
+maxR_all = 0;
+planet_handles = [];
+trail_handles  = [];
+orbit_data     = {};
+
+for p = 1:size(planets,1)
+    name = planets{p,1};
+    a    = planets{p,2};
+    e    = planets{p,3};
+    col  = planets{p,4};
+
+    % Random initial angle (true anomaly in radians)
+    theta0 = rand() * 2*pi; 
+
+    % Distance from Sun at this true anomaly
+    r_mag = a * (1 - e^2) / (1 + e * cos(theta0));
+
+    % Position in orbital plane (assuming XY plane)
+    r0 = [r_mag * cos(theta0);
+          r_mag * sin(theta0);
+          0];
+
+    % Orbital speed from vis-viva equation
+    v_mag = sqrt(G*M_sun * ( 2/r_mag - 1/a ));
+
+    % Velocity direction: perpendicular to position vector in XY plane
+    v_dir = [-sin(theta0); cos(theta0); 0];
+    v0 = v_mag * v_dir;
+
+    % Combine into initial state
+    Y0 = [r0; v0];
+
+    % Orbital period
+    T_orbit = 2*pi*sqrt(a^3 / (G*M_sun));
+
+    % Solve
+    opts = odeset('RelTol',1e-9,'AbsTol',1e-12);
+    odefun = @(t,y) [ y(4:6); -G*M_sun * y(1:3) / norm(y(1:3))^3 ];
+    [t_sol, Y_sol] = ode45(odefun, [0 T_orbit], Y0, opts);
+
+    % Interpolate
+    t_anim = linspace(0, T_orbit, nFrames);
+    Y_anim = interp1(t_sol, Y_sol, t_anim);
+    x = Y_anim(:,1); y = Y_anim(:,2); z = Y_anim(:,3);
+
+    % Store for animation
+    orbit_data{p} = struct('x',x,'y',y,'z',z,'color',col,'name',name);
+    maxR_all = max(maxR_all, max(sqrt(x.^2+y.^2+z.^2)));
+
+    % Plot initial
+    planet_handles(p) = plot3(ax,x(1),y(1),z(1),'o','MarkerSize',8, ...
+        'MarkerFaceColor',col,'MarkerEdgeColor','none');
+    trail_handles(p)  = plot3(ax,x(1),y(1),z(1),'-','LineWidth',1.2, ...
+        'Color',col);
+end
 
 axis(ax,'equal');
-maxR = max( sqrt(x.^2 + y.^2 + z.^2) );
-axis(ax, [-1 1 -1 1 -1 1]*maxR*1.2);
+axis(ax,[-1 1 -1 1 -1 1]*maxR_all*1.3);
 grid(ax,'on');
 view(ax,3);
-xlabel(ax,'x [m]','Color','w'); ylabel(ax,'y [m]','Color','w'); zlabel(ax,'z [m]','Color','w');
+xlabel(ax,'x [m]','Color','w');
+ylabel(ax,'y [m]','Color','w');
+zlabel(ax,'z [m]','Color','w');
 set(ax,'Color',[0 0 0],'XColor','w','YColor','w','ZColor','w');
 
 % --- Animation ---
-frame_skip = 1;          % show every frame; increase to skip for speed
+frame_skip = 1;
 for k = 1:frame_skip:nFrames
-    set(h_planet, 'XData', x(k), 'YData', y(k), 'ZData', z(k));
-    set(h_trail,  'XData', x(1:k), 'YData', y(1:k), 'ZData', z(1:k));
-    title(ax, sprintf('t = %.2f days', t_anim(k)/86400), 'Color','w');
-    drawnow;            % in Octave use drawnow; in MATLAB you can use drawnow limitrate if desired
+    for p = 1:size(planets,1)
+        set(planet_handles(p), 'XData', orbit_data{p}.x(k), ...
+                               'YData', orbit_data{p}.y(k), ...
+                               'ZData', orbit_data{p}.z(k));
+        set(trail_handles(p),  'XData', orbit_data{p}.x(1:k), ...
+                               'YData', orbit_data{p}.y(1:k), ...
+                               'ZData', orbit_data{p}.z(1:k));
+    end
+    title(ax, sprintf('Frame %d / %d', k, nFrames), 'Color','w');
+    drawnow;
 end
